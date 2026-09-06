@@ -1,0 +1,1553 @@
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import {
+  LineChart, Line, AreaChart, Area, BarChart, Bar, XAxis, YAxis,
+  CartesianGrid, Tooltip, Legend, ResponsiveContainer, PieChart, Pie, Cell
+} from "recharts";
+import {
+  Activity, MapPin, Radio, AlertTriangle, Flame, Droplets, Wind, Mountain,
+  ShieldAlert, CheckCircle2, XCircle, Play, Pause, RotateCcw, Gauge, Users,
+  Server, Wifi, WifiOff, BatteryMedium, Download, ChevronRight, Info, Settings as SettingsIcon,
+  LayoutDashboard, BarChart3, Truck, LifeBuoy, Layers, Clock, Zap, Plus, Pencil,
+  Trash2, Power, TestTube2, History, Bell, Lock, GitCompareArrows, FastForward,
+  CircleAlert, MapPinned, Waves, ThermometerSun, CloudRain, Signal
+} from "lucide-react";
+
+/* ============================================================
+   PRAKRITI SENTINEL AI — Distributed Environmental Intelligence
+   & Early-Warning Command Center (SIH26178, Track: Hardware)
+   Every control below drives a real, computed application state.
+   Map coordinates are stylized demonstration coordinates, not a
+   real GIS deployment. All AI scores are computed client-side by
+   a deterministic multi-factor risk engine (see RISK ENGINE section).
+   ============================================================ */
+
+/* ---------------- THEME ---------------- */
+const THEME = `
+  :root{
+    --bg:#0A0E14; --panel:#101720; --panel2:#151E29; --line:#1E2A38;
+    --text:#DCE6F0; --muted:#7C8B9C; --muted2:#57667A;
+    --cyan:#33C7E8; --green:#33C97A; --yellow:#E8B93B; --orange:#F0863F; --red:#E9455A;
+    --mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    --sans: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  }
+  .psa{ font-family:var(--sans); background:var(--bg); color:var(--text); }
+  .psa .mono{ font-family:var(--mono); }
+  .psa-panel{ background:var(--panel); border:1px solid var(--line); border-radius:10px; }
+  .psa-panel2{ background:var(--panel2); border:1px solid var(--line); border-radius:8px; }
+  .psa-scroll::-webkit-scrollbar{ width:6px; height:6px; }
+  .psa-scroll::-webkit-scrollbar-thumb{ background:#26313f; border-radius:4px; }
+  .psa-nav-btn{ display:flex; align-items:center; gap:10px; width:100%; padding:9px 12px; border-radius:8px;
+    color:var(--muted); font-size:13px; font-weight:500; text-align:left; transition:background .12s,color .12s; }
+  .psa-nav-btn:hover{ background:#141C27; color:var(--text); }
+  .psa-nav-btn.active{ background:#152230; color:var(--cyan); }
+  .psa-btn{ display:inline-flex; align-items:center; gap:6px; padding:7px 13px; border-radius:7px; font-size:12.5px;
+    font-weight:600; border:1px solid var(--line); background:#141C27; color:var(--text); cursor:pointer; transition:.12s; }
+  .psa-btn:hover{ filter:brightness(1.18); }
+  .psa-btn:disabled{ opacity:.35; cursor:not-allowed; }
+  .psa-btn-primary{ background:linear-gradient(180deg,#1C4A5C,#153A48); border-color:#2A6478; color:#B8F0FF; }
+  .psa-btn-danger{ background:linear-gradient(180deg,#5C1C24,#3A1216); border-color:#78242E; color:#FFC7CE; }
+  .psa-btn-safe{ background:linear-gradient(180deg,#1C5C3B,#123A26); border-color:#278052; color:#BFF5D8; }
+  .badge{ display:inline-flex; align-items:center; gap:5px; padding:2px 9px; border-radius:20px; font-size:10.5px; font-weight:700; letter-spacing:.3px; }
+  .b-safe{ background:#0F2A1D; color:var(--green); border:1px solid #1E4A33; }
+  .b-watch{ background:#152230; color:var(--cyan); border:1px solid #1E3A4A; }
+  .b-warning{ background:#332A0E; color:var(--yellow); border:1px solid #574616; }
+  .b-high{ background:#3A200E; color:var(--orange); border:1px solid #603410; }
+  .b-critical{ background:#3A0F16; color:var(--red); border:1px solid #60202C; animation:pulseRed 1.6s infinite; }
+  @keyframes pulseRed{ 0%,100%{box-shadow:0 0 0 0 rgba(233,69,90,.35);} 50%{box-shadow:0 0 0 5px rgba(233,69,90,0);} }
+  .psa-input{ background:#0D131B; border:1px solid var(--line); border-radius:6px; padding:6px 9px; font-size:12.5px; color:var(--text); }
+  .psa-input:focus{ outline:1px solid var(--cyan); }
+  .tick{ animation:flash .5s ease; }
+  @keyframes flash{ 0%{ background:#152230; } 100%{ background:transparent; } }
+`;
+
+/* ---------------- CONSTANTS ---------------- */
+const LEVELS = ["SAFE","WATCH","WARNING","HIGH","CRITICAL"];
+const LEVEL_COLOR = { SAFE:"var(--green)", WATCH:"var(--cyan)", WARNING:"var(--yellow)", HIGH:"var(--orange)", CRITICAL:"var(--red)" };
+const LEVEL_BADGE = { SAFE:"b-safe", WATCH:"b-watch", WARNING:"b-warning", HIGH:"b-high", CRITICAL:"b-critical" };
+function levelFromScore(s){ if(s>=85) return "CRITICAL"; if(s>=70) return "HIGH"; if(s>=50) return "WARNING"; if(s>=25) return "WATCH"; return "SAFE"; }
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const HAZARD_ICON = { FLOOD:Droplets, FIRE:Flame, AIR:Wind, LANDSLIDE:Mountain, MULTI:Layers };
+const HAZARD_LABEL = { FLOOD:"Flood", FIRE:"Forest Fire", AIR:"Air Pollution", LANDSLIDE:"Landslide", MULTI:"Multi-Hazard" };
+
+const ZONES = ["Zone A","Zone B","Zone C","Zone D","Zone E"];
+
+const INIT_NODES = [
+  { id:"PS-NODE-01", name:"Riverbank North", type:"FLOOD", zone:"Zone A", x:28, y:34, firmware:"v2.3.1" },
+  { id:"PS-NODE-02", name:"Riverbank South", type:"FLOOD", zone:"Zone A", x:33, y:41, firmware:"v2.3.1" },
+  { id:"PS-NODE-03", name:"Dam Approach", type:"MULTI", zone:"Zone A", x:24, y:46, firmware:"v2.2.0" },
+  { id:"PS-NODE-04", name:"Pine Ridge East", type:"FIRE", zone:"Zone B", x:62, y:22, firmware:"v2.3.1" },
+  { id:"PS-NODE-05", name:"Pine Ridge West", type:"FIRE", zone:"Zone B", x:57, y:27, firmware:"v2.3.0" },
+  { id:"PS-NODE-06", name:"Industrial Belt", type:"AIR", zone:"Zone C", x:70, y:58, firmware:"v2.1.4" },
+  { id:"PS-NODE-07", name:"City Center Sensor", type:"AIR", zone:"Zone C", x:76, y:52, firmware:"v2.3.1" },
+  { id:"PS-NODE-08", name:"Hillside Slope 1", type:"LANDSLIDE", zone:"Zone D", x:44, y:70, firmware:"v2.2.2" },
+  { id:"PS-NODE-09", name:"Hillside Slope 2", type:"LANDSLIDE", zone:"Zone D", x:49, y:75, firmware:"v2.2.2" },
+  { id:"PS-NODE-10", name:"Highland Watch", type:"MULTI", zone:"Zone E", x:82, y:30, firmware:"v2.3.1" },
+];
+
+const SAFE_ZONE_INIT = [
+  { id:"SZ-01", name:"Community Hall — Zone A", x:20, y:30, capacity:400, occupancy:0, status:"AVAILABLE" },
+  { id:"SZ-02", name:"District School — Zone A", x:35, y:25, capacity:600, occupancy:0, status:"AVAILABLE" },
+  { id:"SZ-03", name:"Sports Complex — Zone B", x:65, y:15, capacity:800, occupancy:0, status:"AVAILABLE" },
+  { id:"SZ-04", name:"Relief Camp — Zone C", x:78, y:45, capacity:500, occupancy:0, status:"AVAILABLE" },
+  { id:"SZ-05", name:"Govt. Ground — Zone D", x:40, y:62, capacity:350, occupancy:0, status:"AVAILABLE" },
+];
+
+function baselineTelemetry(type){
+  const base = { temperature:26+Math.random()*3, humidity:55+Math.random()*10, rainfall:Math.random()*3,
+    waterLevel:12+Math.random()*6, smoke:1+Math.random()*2, pm25:20+Math.random()*10, pm10:30+Math.random()*10,
+    gas:2+Math.random()*2, soilMoisture:30+Math.random()*8, vibration:0.02+Math.random()*0.02, battery:80+Math.random()*18 };
+  return base;
+}
+
+function makeInitialNodes(){
+  return INIT_NODES.map(n=>({
+    ...n, connectivity:"ONLINE", signal:70+Math.round(Math.random()*25),
+    lastSeen: Date.now(), telemetry: baselineTelemetry(n.type),
+    history: [], riskScore:Math.round(4+Math.random()*8), riskLevel:"SAFE", confidence:60,
+    fusionStatus:"VALIDATED", factors:[], forcedAnomaly:false,
+  }));
+}
+
+/* ---------------- SCENARIO PROGRESSION ---------------- */
+// Given progress 0..1 (eased), returns target deltas to blend telemetry toward.
+function ease(p){ return p<0.5 ? 2*p*p : 1-Math.pow(-2*p+2,2)/2; }
+
+function scenarioTarget(scenario, baseType, p){
+  const e = ease(clamp(p,0,1));
+  switch(scenario){
+    case "FLOOD":
+      return { rainfall:5+e*80, waterLevel:15+e*82, humidity:55+e*30, soilMoisture:30+e*55 };
+    case "FIRE":
+      return { temperature:27+e*28, humidity:60-e*45, smoke:2+e*85, gas:2+e*10 };
+    case "POLLUTION":
+      return { pm25:25+e*220, pm10:35+e*260, gas:2+e*22, humidity:55-e*10 };
+    case "HEAT":
+      return { temperature:30+e*20, humidity:55-e*35 };
+    case "LANDSLIDE":
+      return { rainfall:5+e*60, soilMoisture:32+e*62, vibration:0.03+e*0.85, waterLevel:15+e*10 };
+    case "INDUSTRIAL":
+      return { gas:2+e*70, smoke:2+e*20, pm25:25+e*90 };
+    default:
+      return null;
+  }
+}
+
+const SCENARIO_RELEVANT_TYPES = {
+  FLOOD:["FLOOD","MULTI"], FIRE:["FIRE","MULTI"], POLLUTION:["AIR","MULTI"],
+  HEAT:["FIRE","AIR","MULTI"], LANDSLIDE:["LANDSLIDE","MULTI"], INDUSTRIAL:["AIR","MULTI"], NORMAL:[],
+};
+const SCENARIO_ZONE = { FLOOD:"Zone A", FIRE:"Zone B", POLLUTION:"Zone C", LANDSLIDE:"Zone D", HEAT:"Zone B", INDUSTRIAL:"Zone C" };
+const TOTAL_TICKS_TO_PEAK = 34;
+
+/* ---------------- RISK ENGINE ---------------- */
+// Deterministic + statistical multi-factor scoring. Each factor is normalized 0-100
+// then combined with fixed weights. Returns {score, factors:[{label, contribution}]}
+function scoreFlood(t, prevT){
+  const levelNorm = clamp(t.waterLevel,0,100);
+  const rate = prevT ? clamp((t.waterLevel-prevT.waterLevel)*9,0,100) : 0;
+  const rainNorm = clamp(t.rainfall*1.1,0,100);
+  const soilNorm = clamp((t.soilMoisture-25)*1.3,0,100);
+  const factors = [
+    {label:"Water level", weight:.45, norm:levelNorm},
+    {label:"Rate of rise", weight:.25, norm:rate},
+    {label:"Rainfall intensity", weight:.20, norm:rainNorm},
+    {label:"Soil saturation", weight:.10, norm:soilNorm},
+  ];
+  return finalizeFactors(factors);
+}
+function scoreFire(t){
+  const tempNorm = clamp((t.temperature-25)*3.2,0,100);
+  const humDeficit = clamp((60-t.humidity)*1.8,0,100);
+  const smokeNorm = clamp(t.smoke*1.15,0,100);
+  const gasNorm = clamp(t.gas*4,0,100);
+  const factors = [
+    {label:"Temperature", weight:.35, norm:tempNorm},
+    {label:"Humidity deficit", weight:.20, norm:humDeficit},
+    {label:"Smoke concentration", weight:.32, norm:smokeNorm},
+    {label:"Gas level", weight:.13, norm:gasNorm},
+  ];
+  return finalizeFactors(factors);
+}
+function scoreAir(t){
+  const pm25Norm = clamp(t.pm25*0.42,0,100);
+  const pm10Norm = clamp(t.pm10*0.34,0,100);
+  const gasNorm = clamp(t.gas*3.5,0,100);
+  const factors = [
+    {label:"PM2.5 concentration", weight:.45, norm:pm25Norm},
+    {label:"PM10 concentration", weight:.32, norm:pm10Norm},
+    {label:"Gas / CO level", weight:.23, norm:gasNorm},
+  ];
+  return finalizeFactors(factors);
+}
+function scoreLandslide(t, prevT){
+  const soilNorm = clamp((t.soilMoisture-25)*1.35,0,100);
+  const vibNorm = clamp(t.vibration*110,0,100);
+  const rainNorm = clamp(t.rainfall*1.1,0,100);
+  const soilRate = prevT ? clamp((t.soilMoisture-prevT.soilMoisture)*14,0,100) : 0;
+  const factors = [
+    {label:"Soil moisture", weight:.30, norm:soilNorm},
+    {label:"Ground vibration", weight:.35, norm:vibNorm},
+    {label:"Rainfall", weight:.20, norm:rainNorm},
+    {label:"Soil moisture rate", weight:.15, norm:soilRate},
+  ];
+  return finalizeFactors(factors);
+}
+function finalizeFactors(factors){
+  let score=0;
+  const withContribution = factors.map(f=>{
+    const contribution = Math.round(f.weight*f.norm);
+    score += contribution;
+    return {label:f.label, contribution};
+  });
+  return { score: clamp(Math.round(score),0,100), factors: withContribution };
+}
+
+function computeHazardScores(node, prevTelemetry){
+  const t = node.telemetry;
+  const out = {};
+  if(node.type==="FLOOD" || node.type==="MULTI") out.FLOOD = scoreFlood(t, prevTelemetry);
+  if(node.type==="FIRE" || node.type==="MULTI") out.FIRE = scoreFire(t);
+  if(node.type==="AIR"  || node.type==="MULTI") out.AIR = scoreAir(t);
+  if(node.type==="LANDSLIDE" || node.type==="MULTI") out.LANDSLIDE = scoreLandslide(t, prevTelemetry);
+  return out;
+}
+
+function primaryHazard(hazardScores){
+  let best=null, bestScore=-1;
+  for(const k in hazardScores){ if(hazardScores[k].score>bestScore){ bestScore=hazardScores[k].score; best=k; } }
+  return best;
+}
+
+/* ---------------- MAIN APP ---------------- */
+export default function PrakritiSentinelAI(){
+  const [nodes,setNodes] = useState(makeInitialNodes);
+  const [alerts,setAlerts] = useState([]);
+  const [incidents,setIncidents] = useState([]);
+  const [notifications,setNotifications] = useState([]);
+  const [eventLog,setEventLog] = useState([{ time:new Date().toLocaleTimeString(), source:"SYSTEM", message:"Prakriti Sentinel AI command center initialized. All nodes reporting baseline safe conditions." }]);
+  const [safeZones,setSafeZones] = useState(SAFE_ZONE_INIT);
+  const [scenario,setScenario] = useState("NORMAL");
+  const [simRunning,setSimRunning] = useState(false);
+  const [simSpeed,setSimSpeed] = useState(1);
+  const [tick,setTick] = useState(0);
+  const [activeView,setActiveView] = useState("dashboard");
+  const [selectedNodeId,setSelectedNodeId] = useState(null);
+  const [mapFilter,setMapFilter] = useState("ALL");
+  const [role,setRole] = useState("ADMIN");
+  const [systemStatus,setSystemStatus] = useState("ONLINE");
+  const [queuedEvents,setQueuedEvents] = useState(0);
+  const [responseWorkflows,setResponseWorkflows] = useState({}); // incidentId -> steps state
+  const [analyticsRange,setAnalyticsRange] = useState("1H");
+  const [toast,setToast] = useState(null);
+  const [demoRunning,setDemoRunning] = useState(false);
+  const [demoStepIdx,setDemoStepIdx] = useState(0);
+  const [flashKey,setFlashKey] = useState(0);
+  const [newNodeForm,setNewNodeForm] = useState(null);
+  const [editingNodeId,setEditingNodeId] = useState(null);
+  const [historyNodeId,setHistoryNodeId] = useState(null);
+
+  const tickRef = useRef(0);
+  const prevTelemetryRef = useRef({});
+
+  const canEdit = role==="ADMIN" || role==="OPERATOR";
+  const canRespond = role==="ADMIN" || role==="AUTHORITY";
+
+  function pushEvent(source, message, severity){
+    const entry = { time:new Date().toLocaleTimeString(), source, message, severity: severity||"INFO" };
+    if(systemStatus==="OFFLINE"){
+      setQueuedEvents(q=>q+1);
+    }
+    setEventLog(prev=>[entry, ...prev].slice(0,120));
+  }
+  function pushNotification(recipient, message, severity){
+    setNotifications(prev=>[{ id:"N-"+Math.random().toString(36).slice(2,8), recipient, message, severity,
+      time:new Date().toLocaleTimeString(), channel:"IN_APP", status:"DELIVERED" },
+      { id:"N-"+Math.random().toString(36).slice(2,8), recipient, message, severity,
+      time:new Date().toLocaleTimeString(), channel:"SMS", status:"PROVIDER_NOT_CONFIGURED" },
+      { id:"N-"+Math.random().toString(36).slice(2,8), recipient, message, severity,
+      time:new Date().toLocaleTimeString(), channel:"EMAIL", status:"PROVIDER_NOT_CONFIGURED" },
+      ...prev].slice(0,80));
+  }
+  function showToast(msg, tone){ setToast({msg,tone}); setTimeout(()=>setToast(null),3200); }
+
+  /* ---------- SIMULATION LOOP ---------- */
+  useEffect(()=>{
+    if(!simRunning || systemStatus==="OFFLINE") return;
+    const interval = setInterval(()=>{
+      tickRef.current += 1;
+      setTick(tickRef.current);
+      setFlashKey(k=>k+1);
+      advanceSimulation(tickRef.current);
+    }, 1400/simSpeed);
+    return ()=>clearInterval(interval);
+    // eslint-disable-next-line
+  },[simRunning, simSpeed, scenario, systemStatus]);
+
+  function advanceSimulation(t){
+    setNodes(prevNodes=>{
+      const zoneAffected = SCENARIO_ZONE[scenario];
+      const relevantTypes = SCENARIO_RELEVANT_TYPES[scenario]||[];
+      const progress = t / TOTAL_TICKS_TO_PEAK;
+
+      const updated = prevNodes.map(node=>{
+        if(node.connectivity==="OFFLINE") return node;
+        let telemetry = { ...node.telemetry };
+        const prevT = prevTelemetryRef.current[node.id];
+
+        const isAffected = scenario!=="NORMAL" && node.zone===zoneAffected && relevantTypes.includes(node.type);
+
+        if(isAffected){
+          const target = scenarioTarget(scenario, node.type, progress);
+          if(target){
+            Object.keys(target).forEach(k=>{ telemetry[k] = telemetry[k]*0.55 + target[k]*0.45 + (Math.random()-0.5)*1.5; });
+          }
+        } else {
+          // gentle drift back to baseline + small noise for realism
+          const base = baselineTelemetry(node.type);
+          Object.keys(base).forEach(k=>{
+            if(k==="battery") return;
+            telemetry[k] = telemetry[k]*0.9 + base[k]*0.1 + (Math.random()-0.5)*0.6;
+          });
+        }
+
+        // forced one-tick anomaly (Sensor Anomaly Demo)
+        if(node.forcedAnomaly){
+          telemetry.waterLevel = node.type==="FLOOD"||node.type==="MULTI" ? 96 : telemetry.waterLevel;
+          telemetry.pm25 = node.type==="AIR" ? 310 : telemetry.pm25;
+          telemetry.gas = node.type==="AIR" ? 45 : telemetry.gas;
+        }
+        telemetry.battery = clamp(telemetry.battery - (isAffected?0.06:0.015),1,100);
+
+        const hazardScores = computeHazardScores({...node, telemetry}, prevT);
+        const haz = primaryHazard(hazardScores);
+        let riskScore=0, factors=[];
+        if(haz){ riskScore = hazardScores[haz].score; factors = hazardScores[haz].factors; }
+
+        // neighbor correlation for sensor fusion
+        const neighbors = prevNodes.filter(n=>n.id!==node.id && n.zone===node.zone);
+        const neighborAvgRisk = neighbors.length ? neighbors.reduce((s,n)=>s+n.riskScore,0)/neighbors.length : 0;
+
+        let fusionStatus = "VALIDATED";
+        let confidence = 58;
+        const isolatedSpike = node.forcedAnomaly && riskScore>=55 && neighborAvgRisk < riskScore*0.35;
+
+        if(isolatedSpike){
+          fusionStatus = "ANOMALY_SUSPECTED";
+          confidence = 34;
+          riskScore = Math.min(riskScore, 40); // downgrade displayed risk after fusion check
+        } else if(isAffected){
+          const agreement = neighbors.length ? clamp(neighborAvgRisk/Math.max(riskScore,1),0,1) : 0.5;
+          confidence = clamp(58 + agreement*28 + (t>6?10:0), 40, 98);
+          fusionStatus = neighbors.length && neighborAvgRisk>15 ? "VALIDATED" : "VALIDATED (SINGLE NODE)";
+        } else {
+          confidence = 60;
+        }
+
+        const riskLevel = levelFromScore(riskScore);
+        const newHistoryEntry = { tick:t, time:new Date().toLocaleTimeString(), riskScore, waterLevel:telemetry.waterLevel,
+          temperature:telemetry.temperature, pm25:telemetry.pm25, soilMoisture:telemetry.soilMoisture, rainfall:telemetry.rainfall };
+        const history = [...node.history, newHistoryEntry].slice(-60);
+
+        prevTelemetryRef.current[node.id] = telemetry;
+
+        return { ...node, telemetry, riskScore, riskLevel, confidence:Math.round(confidence),
+          fusionStatus, factors, primaryHazard:haz, history, lastSeen:Date.now(), forcedAnomaly:false,
+          hazardScores };
+      });
+
+      // events / alerts / incidents based on transitions
+      updated.forEach((node, i)=>{
+        const prevNode = prevNodes[i];
+        if(!prevNode) return;
+        if(node.fusionStatus==="ANOMALY_SUSPECTED" && prevNode.fusionStatus!=="ANOMALY_SUSPECTED"){
+          pushEvent(node.id, `Reported anomalous reading with no neighbor correlation — flagged POSSIBLE SENSOR FAULT.`, "WARNING");
+          pushEvent("SENSOR FUSION", `Event rejected by sensor fusion for ${node.id}. No alert generated.`, "INFO");
+        }
+        if(node.riskLevel!==prevNode.riskLevel && node.fusionStatus!=="ANOMALY_SUSPECTED"){
+          pushEvent(node.id, `${HAZARD_LABEL[node.primaryHazard]||node.type} risk moved ${prevNode.riskLevel} \u2192 ${node.riskLevel} (score ${node.riskScore}).`,
+            node.riskLevel==="CRITICAL"?"CRITICAL":node.riskLevel==="HIGH"?"HIGH":"INFO");
+        }
+        const crossedAlertLevel = (node.riskLevel==="HIGH"||node.riskLevel==="CRITICAL") &&
+          (prevNode.riskLevel!=="HIGH" && prevNode.riskLevel!=="CRITICAL") && node.fusionStatus!=="ANOMALY_SUSPECTED";
+        if(crossedAlertLevel){
+          createAlert(node);
+        }
+        if(node.riskLevel==="CRITICAL" && prevNode.riskLevel!=="CRITICAL" && node.fusionStatus!=="ANOMALY_SUSPECTED"){
+          createIncident(node);
+        }
+      });
+
+      return updated;
+    });
+  }
+
+  function createAlert(node){
+    const hazard = node.primaryHazard;
+    const id = "AL-"+Math.random().toString(36).slice(2,7).toUpperCase();
+    const reasonParts = (node.factors||[]).slice().sort((a,b)=>b.contribution-a.contribution).slice(0,3)
+      .map(f=>f.label);
+    const alert = {
+      id, hazard, nodeId:node.id, nodeName:node.name, location:node.zone, riskScore:node.riskScore,
+      confidence:node.confidence, timestamp:new Date().toLocaleString(),
+      reason: reasonParts.join(" + "), recommendedActions: recommendedActions(hazard, node.riskLevel),
+      status:"ACTIVE", level:node.riskLevel,
+    };
+    setAlerts(prev=>[alert, ...prev]);
+    pushEvent("ALERT ENGINE", `${node.riskLevel} ${HAZARD_LABEL[hazard]} alert generated for ${node.id} (${node.zone}). Risk ${node.riskScore}/100.`, node.riskLevel);
+    pushNotification("Zone Authorities", `${node.riskLevel} ${HAZARD_LABEL[hazard]} alert — ${node.zone}. Risk ${node.riskScore}/100.`, node.riskLevel);
+  }
+
+  function createIncident(node){
+    const hazard = node.primaryHazard;
+    setIncidents(prev=>{
+      const alreadyOpen = prev.find(inc=>inc.nodeId===node.id && inc.status!=="RESOLVED");
+      if(alreadyOpen) return prev;
+      const id = "INC-"+String(prev.length+1).padStart(3,"0");
+      const incident = {
+        id, hazard, nodeId:node.id, location:node.zone, startTime:new Date().toLocaleString(),
+        peakRisk:node.riskScore, peakConfidence:node.confidence, affectedNodes:[node.id],
+        actionsTaken:[], status:"OPEN", resolutionTime:null,
+      };
+      pushEvent("INCIDENT", `Incident ${id} opened — CRITICAL ${HAZARD_LABEL[hazard]} at ${node.zone}.`, "CRITICAL");
+      return [incident, ...prev];
+    });
+  }
+
+  function recommendedActions(hazard, level){
+    const base = {
+      FLOOD:["Alert zone authorities","Notify nearby communities","Open nearest safe zone","Begin evacuation protocol","Dispatch trained response team"],
+      FIRE:["Alert forest fire control room","Deploy ground reconnaissance","Restrict access to affected ridge","Prepare firebreak resources","Notify nearby settlements"],
+      AIR:["Issue public health advisory","Restrict outdoor activity in zone","Notify pollution control board","Increase monitoring frequency"],
+      LANDSLIDE:["Alert zone authorities","Restrict movement on slope road","Prepare evacuation of at-risk structures","Dispatch geotechnical team"],
+    };
+    return base[hazard] || ["Alert zone authorities","Increase monitoring frequency"];
+  }
+
+  /* ---------- ALERT ACTIONS ---------- */
+  function acknowledgeAlert(id){
+    setAlerts(prev=>prev.map(a=>a.id===id?{...a,status:"ACKNOWLEDGED"}:a));
+    pushEvent("OPERATOR", `Alert ${id} acknowledged.`, "INFO");
+    showToast("Alert acknowledged","cyan");
+  }
+  function escalateAlert(id){
+    setAlerts(prev=>prev.map(a=>a.id===id?{...a,level:"CRITICAL",status:"ACTIVE"}:a));
+    pushEvent("OPERATOR", `Alert ${id} escalated to CRITICAL.`, "CRITICAL");
+    showToast("Alert escalated to CRITICAL","red");
+  }
+  function resolveAlert(id){
+    setAlerts(prev=>prev.map(a=>a.id===id?{...a,status:"RESOLVED"}:a));
+    pushEvent("OPERATOR", `Alert ${id} marked resolved.`, "INFO");
+    showToast("Alert resolved","green");
+  }
+
+  /* ---------- RESCUE / RESPONSE WORKFLOW ---------- */
+  const WORKFLOW_STEPS = ["STARTED","TEAM_DISPATCHED","EVACUATION_MARKED","SAFE_ZONE_OPENED","RESOLVED"];
+  function startResponse(incidentId){
+    setResponseWorkflows(prev=>({...prev,[incidentId]:{stepIndex:0}}));
+    setIncidents(prev=>prev.map(i=>i.id===incidentId?{...i,status:"RESPONSE_STARTED",actionsTaken:[...i.actionsTaken,"Response started"]}:i));
+    pushEvent("RESPONSE", `Response workflow started for ${incidentId}.`, "INFO");
+  }
+  function advanceWorkflow(incidentId, stepName){
+    setResponseWorkflows(prev=>({...prev,[incidentId]:{stepIndex:(prev[incidentId]?.stepIndex??0)+1}}));
+    setIncidents(prev=>prev.map(i=>i.id===incidentId?{...i,actionsTaken:[...i.actionsTaken, stepName]}:i));
+    pushEvent("RESPONSE", `${incidentId}: ${stepName.replace(/_/g," ")}.`, "INFO");
+    if(stepName==="SAFE_ZONE_OPENED"){
+      const inc = incidents.find(i=>i.id===incidentId);
+      if(inc){
+        const nearest = nearestSafeZone(inc.nodeId);
+        if(nearest){
+          setSafeZones(prev=>prev.map(z=>z.id===nearest.id?{...z,occupancy:clamp(z.occupancy+Math.round(80+Math.random()*120),0,z.capacity),
+            status: (z.occupancy > z.capacity*0.85)?"NEAR CAPACITY":z.status}:z));
+        }
+      }
+    }
+    if(stepName==="RESOLVED"){
+      setIncidents(prev=>prev.map(i=>i.id===incidentId?{...i,status:"RESOLVED",resolutionTime:new Date().toLocaleString()}:i));
+      pushEvent("INCIDENT", `Incident ${incidentId} resolved.`, "INFO");
+      showToast(`Incident ${incidentId} resolved`,"green");
+    }
+  }
+  function nearestSafeZone(nodeId){
+    const node = nodes.find(n=>n.id===nodeId);
+    if(!node) return null;
+    const candidates = safeZones.filter(z=>z.status!=="FULL" && z.status!=="CLOSED");
+    if(!candidates.length) return null;
+    return candidates.reduce((best,z)=>{
+      const d = Math.hypot(z.x-node.x, z.y-node.y);
+      return (!best || d<best.d) ? {...z, d} : best;
+    }, null);
+  }
+
+  /* ---------- NODE ACTIONS ---------- */
+  function disableNode(id){
+    setNodes(prev=>prev.map(n=>n.id===id?{...n,connectivity:n.connectivity==="OFFLINE"?"ONLINE":"OFFLINE"}:n));
+    const n = nodes.find(x=>x.id===id);
+    pushEvent(id, n?.connectivity==="OFFLINE" ? "Node brought back online." : "Node manually disabled by operator.", "INFO");
+  }
+  function restartNode(id){
+    setNodes(prev=>prev.map(n=>n.id===id?{...n, telemetry:baselineTelemetry(n.type), riskScore:5, riskLevel:"SAFE",
+      confidence:60, connectivity:"ONLINE", history:[]}:n));
+    pushEvent(id, "Node restarted — telemetry reset to baseline safe values.", "INFO");
+    showToast(`${id} restarted`,"cyan");
+  }
+  function sendTestData(id){
+    setNodes(prev=>prev.map(n=>n.id===id?{...n, forcedAnomaly:true}:n));
+    pushEvent(id, "Manual test telemetry injected by operator (anomaly probe).", "INFO");
+    showToast(`Test data sent to ${id}`,"cyan");
+  }
+  function deleteNode(id){
+    setNodes(prev=>prev.filter(n=>n.id!==id));
+    pushEvent("SYSTEM", `Node ${id} removed from fleet by ${role}.`, "WARNING");
+  }
+  function addNode(form){
+    const id = "PS-NODE-"+String(nodes.length+1).padStart(2,"0")+"X";
+    setNodes(prev=>[...prev,{
+      id, name:form.name||"New Node", type:form.type, zone:form.zone, x:Number(form.x)||50, y:Number(form.y)||50,
+      firmware:"v2.3.1", connectivity:"ONLINE", signal:80, lastSeen:Date.now(),
+      telemetry:baselineTelemetry(form.type), history:[], riskScore:5, riskLevel:"SAFE",
+      confidence:60, fusionStatus:"VALIDATED", factors:[], forcedAnomaly:false,
+    }]);
+    pushEvent("SYSTEM", `New node ${id} (${form.type}) provisioned in ${form.zone}.`, "INFO");
+    setNewNodeForm(null);
+  }
+  function saveEditNode(id, form){
+    setNodes(prev=>prev.map(n=>n.id===id?{...n,name:form.name,type:form.type,zone:form.zone}:n));
+    setEditingNodeId(null);
+    pushEvent(id, "Node configuration updated.", "INFO");
+  }
+
+  /* ---------- DEMO / ANOMALY TRIGGERS ---------- */
+  function runSensorAnomalyDemo(){
+    const candidates = nodes.filter(n=>n.connectivity==="ONLINE" && (n.type==="FLOOD"||n.type==="AIR"||n.type==="MULTI"));
+    if(!candidates.length) return;
+    const target = candidates[Math.floor(Math.random()*candidates.length)];
+    setNodes(prev=>prev.map(n=>n.id===target.id?{...n,forcedAnomaly:true}:n));
+    if(!simRunning) setSimRunning(true);
+    pushEvent("DEMO", `Sensor Anomaly Demo: injecting isolated extreme reading on ${target.id}.`, "WARNING");
+    showToast("Anomaly injected — watch Sensor Fusion reject it","yellow");
+  }
+  function startJudgingDemo(){
+    setDemoRunning(true);
+    setDemoStepIdx(0);
+    setScenario("FLOOD");
+    setSimSpeed(3);
+    setSimRunning(true);
+    setActiveView("dashboard");
+    pushEvent("DEMO", "Judging Demo started — Flood scenario, 3x speed.", "INFO");
+  }
+  function stopJudgingDemo(){
+    setDemoRunning(false);
+    setSimRunning(false);
+  }
+  const DEMO_STEPS = [
+    "Normal environment — all nodes reporting safe baseline conditions.",
+    "Rainfall begins increasing across Zone A river sensors.",
+    "Water level rises steadily at PS-NODE-01 and PS-NODE-02.",
+    "Multiple nodes in Zone A detect the same abnormal trend.",
+    "AI risk engine validates the event via sensor fusion.",
+    "Flood risk score climbs into WARNING / HIGH range.",
+    "Live map highlights the expanding risk zone in Zone A.",
+    "Critical alert generated once risk crosses 85/100.",
+    "Nearest available safe zone is recommended automatically.",
+    "Rescue & Response workflow is ready to dispatch a team.",
+  ];
+  useEffect(()=>{
+    if(!demoRunning) return;
+    const t = setInterval(()=> setDemoStepIdx(i=> Math.min(i+1, DEMO_STEPS.length-1)), 4500);
+    return ()=>clearInterval(t);
+  },[demoRunning]);
+
+  /* ---------- SYSTEM HEALTH / EDGE MODE ---------- */
+  function simulateConnectivityLoss(){
+    setSystemStatus("OFFLINE");
+    setSimRunning(false);
+    pushEvent("SYSTEM", "Connectivity lost — entering EDGE MODE. Data will be processed locally and queued.", "CRITICAL");
+  }
+  function restoreConnectivity(){
+    setSystemStatus("SYNCING");
+    setTimeout(()=>{
+      setSystemStatus("ONLINE");
+      pushEvent("SYSTEM", `Connectivity restored — synchronized ${queuedEvents} queued events.`, "INFO");
+      setQueuedEvents(0);
+      showToast("Connection restored — data synced","green");
+    }, 1600);
+  }
+
+  /* ---------- CSV EXPORT ---------- */
+  function exportIncidentsCSV(){
+    const header = ["ID","Hazard","Location","Start Time","Peak Risk","Peak Confidence","Affected Nodes","Status","Resolution Time"];
+    const rows = incidents.map(i=>[i.id,i.hazard,i.location,i.startTime,i.peakRisk,i.peakConfidence,i.affectedNodes.join("|"),i.status,i.resolutionTime||""]);
+    const csv = [header, ...rows].map(r=>r.map(v=>`"${String(v).replace(/"/g,'""')}"`).join(",")).join("\n");
+    const blob = new Blob([csv], {type:"text/csv"});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "prakriti_incidents.csv"; a.click();
+    URL.revokeObjectURL(url);
+    pushEvent("ANALYTICS", "Incident history exported to CSV.", "INFO");
+  }
+
+  /* ---------- DERIVED / MEMOIZED ---------- */
+  const kpi = useMemo(()=>{
+    const online = nodes.filter(n=>n.connectivity==="ONLINE").length;
+    return {
+      total: nodes.length, online, offline: nodes.length-online,
+      activeAlerts: alerts.filter(a=>a.status==="ACTIVE").length,
+      criticalAlerts: alerts.filter(a=>a.level==="CRITICAL" && a.status!=="RESOLVED").length,
+      atRisk: nodes.filter(n=>n.riskLevel==="HIGH"||n.riskLevel==="CRITICAL").length,
+      hazardsDetected: new Set(nodes.filter(n=>n.riskLevel!=="SAFE"&&n.riskLevel!=="WATCH").map(n=>n.primaryHazard)).size,
+      networkHealth: Math.round((online/nodes.length)*100),
+    };
+  },[nodes,alerts]);
+
+  const filteredMapNodes = useMemo(()=>{
+    if(mapFilter==="ALL") return nodes;
+    if(mapFilter==="CRITICAL") return nodes.filter(n=>n.riskLevel==="CRITICAL");
+    return nodes.filter(n=>n.type===mapFilter || (n.type==="MULTI" && n.hazardScores && n.hazardScores[mapFilter]));
+  },[nodes,mapFilter]);
+
+  const selectedNode = nodes.find(n=>n.id===selectedNodeId);
+
+  /* ---------- ESTIMATED TIME TO CRITICAL (flood) ---------- */
+  function estimateTimeToCritical(node){
+    if(!node || node.history.length<3) return null;
+    const h = node.history.slice(-5);
+    const deltaLevel = h[h.length-1].waterLevel - h[0].waterLevel;
+    const deltaTicks = h.length-1;
+    const perTick = deltaLevel/deltaTicks;
+    if(perTick<=0.05) return null;
+    const remaining = 85 - node.telemetry.waterLevel;
+    if(remaining<=0) return "REACHED";
+    const ticksNeeded = remaining/perTick;
+    const secondsPerTick = 1.4/simSpeed;
+    const minutes = (ticksNeeded*secondsPerTick)/60;
+    return minutes<1 ? "<1 min" : `~${minutes.toFixed(1)} min`;
+  }
+
+  return (
+    <div className="psa" style={{minHeight:"100vh",display:"flex",fontSize:13}}>
+      <style>{THEME}</style>
+
+      {/* SIDEBAR */}
+      <div style={{width:220,borderRight:"1px solid var(--line)",display:"flex",flexDirection:"column",padding:"16px 12px",flexShrink:0}}>
+        <div style={{display:"flex",alignItems:"center",gap:9,padding:"2px 4px 18px 4px"}}>
+          <div style={{width:30,height:30,borderRadius:8,background:"linear-gradient(135deg,#153A48,#0A0E14)",border:"1px solid #2A6478",display:"flex",alignItems:"center",justifyContent:"center"}}>
+            <ShieldAlert size={16} color="var(--cyan)" />
+          </div>
+          <div>
+            <div style={{fontWeight:800,fontSize:12.5,letterSpacing:.2}}>PRAKRITI SENTINEL</div>
+            <div style={{fontSize:9.5,color:"var(--muted2)",letterSpacing:1}}>AI COMMAND CENTER</div>
+          </div>
+        </div>
+        <NavBtn icon={LayoutDashboard} label="Dashboard" id="dashboard" active={activeView} set={setActiveView} />
+        <NavBtn icon={MapPinned} label="Live Map" id="map" active={activeView} set={setActiveView} />
+        <NavBtn icon={Radio} label="Sensor Nodes" id="nodes" active={activeView} set={setActiveView} />
+        <NavBtn icon={Gauge} label="Hazard Intelligence" id="intel" active={activeView} set={setActiveView} />
+        <NavBtn icon={Bell} label="Alerts" id="alerts" active={activeView} set={setActiveView} badge={kpi.activeAlerts} />
+        <NavBtn icon={LifeBuoy} label="Rescue / Response" id="rescue" active={activeView} set={setActiveView} />
+        <NavBtn icon={BarChart3} label="Analytics" id="analytics" active={activeView} set={setActiveView} />
+        <NavBtn icon={FastForward} label="Simulation" id="simulation" active={activeView} set={setActiveView} />
+        <NavBtn icon={Lock} label="Device Management" id="devices" active={activeView} set={setActiveView} />
+        <NavBtn icon={Server} label="System Health" id="health" active={activeView} set={setActiveView} />
+        <NavBtn icon={SettingsIcon} label="Settings" id="settings" active={activeView} set={setActiveView} />
+
+        <div style={{marginTop:"auto",paddingTop:12,borderTop:"1px solid var(--line)"}}>
+          <div style={{display:"flex",alignItems:"center",gap:7,fontSize:11,color:"var(--muted)"}}>
+            <div style={{width:7,height:7,borderRadius:99,background: systemStatus==="ONLINE"?"var(--green)":systemStatus==="SYNCING"?"var(--yellow)":"var(--red)"}} />
+            {systemStatus} {queuedEvents>0 && `· ${queuedEvents} queued`}
+          </div>
+          <div style={{fontSize:10.5,color:"var(--muted2)",marginTop:4}}>Role: {role}</div>
+        </div>
+      </div>
+
+      {/* MAIN */}
+      <div style={{flex:1,minWidth:0,display:"flex",flexDirection:"column"}}>
+        {/* TOP BAR */}
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"12px 20px",borderBottom:"1px solid var(--line)"}}>
+          <div>
+            <div style={{fontSize:15,fontWeight:700}}>{viewTitle(activeView)}</div>
+            <div style={{fontSize:11,color:"var(--muted2)"}}>Prototype demonstration data — SIH26178 · Track: Hardware</div>
+          </div>
+          <div style={{display:"flex",gap:8,alignItems:"center"}}>
+            <button className="psa-btn" onClick={runSensorAnomalyDemo}><TestTube2 size={13}/> Sensor Anomaly Demo</button>
+            {!demoRunning ? (
+              <button className="psa-btn psa-btn-primary" onClick={startJudgingDemo}><Play size={13}/> Judging Demo</button>
+            ) : (
+              <button className="psa-btn psa-btn-danger" onClick={stopJudgingDemo}><Pause size={13}/> Stop Demo</button>
+            )}
+          </div>
+        </div>
+
+        {demoRunning && (
+          <div className="psa-panel2" style={{margin:"10px 20px 0 20px",padding:"10px 14px",display:"flex",alignItems:"center",gap:12}}>
+            <Zap size={15} color="var(--cyan)"/>
+            <div style={{fontSize:12.5}}><b>Step {demoStepIdx+1}/10:</b> {DEMO_STEPS[demoStepIdx]}</div>
+            <div style={{marginLeft:"auto",display:"flex",gap:6}}>
+              <button className="psa-btn" style={{padding:"4px 9px"}} onClick={()=>setDemoStepIdx(i=>Math.max(0,i-1))}>Prev</button>
+              <button className="psa-btn" style={{padding:"4px 9px"}} onClick={()=>setDemoStepIdx(i=>Math.min(DEMO_STEPS.length-1,i+1))}>Next</button>
+            </div>
+          </div>
+        )}
+
+        <div className="psa-scroll" style={{flex:1,overflow:"auto",padding:20}}>
+          {activeView==="dashboard" && (
+            <DashboardView kpi={kpi} nodes={nodes} alerts={alerts} eventLog={eventLog} flashKey={flashKey}
+              setActiveView={setActiveView} setSelectedNodeId={setSelectedNodeId} mapFilter={mapFilter} setMapFilter={setMapFilter}
+              filteredMapNodes={filteredMapNodes} safeZones={safeZones} />
+          )}
+          {activeView==="map" && (
+            <MapView nodes={filteredMapNodes} mapFilter={mapFilter} setMapFilter={setMapFilter}
+              setSelectedNodeId={setSelectedNodeId} safeZones={safeZones} />
+          )}
+          {activeView==="nodes" && (
+            <NodesView nodes={nodes} canEdit={canEdit} disableNode={disableNode} restartNode={restartNode}
+              sendTestData={sendTestData} deleteNode={deleteNode} newNodeForm={newNodeForm} setNewNodeForm={setNewNodeForm}
+              addNode={addNode} editingNodeId={editingNodeId} setEditingNodeId={setEditingNodeId} saveEditNode={saveEditNode}
+              historyNodeId={historyNodeId} setHistoryNodeId={setHistoryNodeId} setSelectedNodeId={setSelectedNodeId} />
+          )}
+          {activeView==="intel" && <IntelView nodes={nodes} />}
+          {activeView==="alerts" && (
+            <AlertsView alerts={alerts} canRespond={canRespond} acknowledgeAlert={acknowledgeAlert}
+              escalateAlert={escalateAlert} resolveAlert={resolveAlert} />
+          )}
+          {activeView==="rescue" && (
+            <RescueView incidents={incidents} nodes={nodes} safeZones={safeZones} canRespond={canRespond}
+              startResponse={startResponse} advanceWorkflow={advanceWorkflow} responseWorkflows={responseWorkflows}
+              nearestSafeZone={nearestSafeZone} WORKFLOW_STEPS={WORKFLOW_STEPS} />
+          )}
+          {activeView==="analytics" && (
+            <AnalyticsView nodes={nodes} incidents={incidents} alerts={alerts} analyticsRange={analyticsRange}
+              setAnalyticsRange={setAnalyticsRange} exportIncidentsCSV={exportIncidentsCSV} />
+          )}
+          {activeView==="simulation" && (
+            <SimulationView scenario={scenario} setScenario={setScenario} simRunning={simRunning} setSimRunning={setSimRunning}
+              simSpeed={simSpeed} setSimSpeed={setSimSpeed} tick={tick} nodes={nodes} estimateTimeToCritical={estimateTimeToCritical}
+              runSensorAnomalyDemo={runSensorAnomalyDemo} setTick={setTick} tickRef={tickRef} />
+          )}
+          {activeView==="devices" && <DevicesView nodes={nodes} pushEvent={pushEvent} eventLog={eventLog} />}
+          {activeView==="health" && (
+            <HealthView systemStatus={systemStatus} simulateConnectivityLoss={simulateConnectivityLoss}
+              restoreConnectivity={restoreConnectivity} kpi={kpi} nodes={nodes} queuedEvents={queuedEvents} />
+          )}
+          {activeView==="settings" && (
+            <SettingsView role={role} setRole={setRole} notifications={notifications} />
+          )}
+        </div>
+      </div>
+
+      {selectedNode && <NodeDetailModal node={selectedNode} onClose={()=>setSelectedNodeId(null)} estimateTimeToCritical={estimateTimeToCritical} />}
+
+      {toast && (
+        <div style={{position:"fixed",bottom:22,right:22,background:"var(--panel)",border:"1px solid var(--line)",
+          borderLeft:`3px solid ${toast.tone==="red"?"var(--red)":toast.tone==="green"?"var(--green)":toast.tone==="yellow"?"var(--yellow)":"var(--cyan)"}`,
+          padding:"10px 16px",borderRadius:8,fontSize:12.5,boxShadow:"0 8px 24px rgba(0,0,0,.4)",zIndex:50}}>
+          {toast.msg}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function viewTitle(id){
+  return {dashboard:"Command Center Dashboard",map:"Live Environmental Risk Map",nodes:"Sensor Node Management",
+    intel:"Hazard Intelligence",alerts:"Alert Engine",rescue:"Rescue & Response",analytics:"Analytics",
+    simulation:"Hardware Simulation Center",devices:"Device Management & Security",health:"System Health",settings:"Settings"}[id] || "";
+}
+
+function NavBtn({icon:Icon,label,id,active,set,badge}){
+  return (
+    <button className={"psa-nav-btn"+(active===id?" active":"")} onClick={()=>set(id)}>
+      <Icon size={15}/> <span style={{flex:1}}>{label}</span>
+      {!!badge && <span style={{background:"var(--red)",color:"#fff",fontSize:10,fontWeight:700,borderRadius:20,padding:"1px 6px"}}>{badge}</span>}
+    </button>
+  );
+}
+
+/* ================= DASHBOARD ================= */
+function DashboardView({kpi,nodes,alerts,eventLog,flashKey,setActiveView,setSelectedNodeId,mapFilter,setMapFilter,filteredMapNodes,safeZones}){
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:16}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(8,1fr)",gap:10}}>
+        <KpiCard label="Total Nodes" value={kpi.total} icon={Radio} color="var(--cyan)" />
+        <KpiCard label="Online" value={kpi.online} icon={Wifi} color="var(--green)" />
+        <KpiCard label="Offline" value={kpi.offline} icon={WifiOff} color="var(--muted)" />
+        <KpiCard label="Active Alerts" value={kpi.activeAlerts} icon={Bell} color="var(--yellow)" />
+        <KpiCard label="Critical Alerts" value={kpi.criticalAlerts} icon={AlertTriangle} color="var(--red)" />
+        <KpiCard label="Areas At Risk" value={kpi.atRisk} icon={Users} color="var(--orange)" />
+        <KpiCard label="Hazards Detected" value={kpi.hazardsDetected} icon={Gauge} color="var(--cyan)" />
+        <KpiCard label="Network Health" value={kpi.networkHealth+"%"} icon={Signal} color="var(--green)" />
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"1.5fr 1fr",gap:14}}>
+        <div className="psa-panel" style={{padding:14}}>
+          <PanelHeader title="Live Environment Map" action={<button className="psa-btn" onClick={()=>setActiveView("map")}>Open full map <ChevronRight size={12}/></button>} />
+          <StylizedMap nodes={filteredMapNodes} onSelect={setSelectedNodeId} safeZones={safeZones} height={320} />
+        </div>
+        <div className="psa-panel" style={{padding:14,display:"flex",flexDirection:"column"}}>
+          <PanelHeader title="Real-Time Event Log" />
+          <div className="psa-scroll" style={{flex:1,overflow:"auto",maxHeight:290,display:"flex",flexDirection:"column",gap:6}}>
+            {eventLog.slice(0,25).map((e,i)=>(
+              <div key={i} className={i===0?"tick":""} style={{fontSize:11.5,padding:"6px 8px",borderRadius:6,background:"#0D131B",border:"1px solid var(--line)"}}>
+                <span className="mono" style={{color:"var(--muted2)"}}>{e.time}</span>{" "}
+                <b style={{color: e.severity==="CRITICAL"?"var(--red)":e.severity==="HIGH"?"var(--orange)":e.severity==="WARNING"?"var(--yellow)":"var(--cyan)"}}>{e.source}</b>
+                {" — "}{e.message}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
+        <div className="psa-panel" style={{padding:14}}>
+          <PanelHeader title="Active Alerts" action={<button className="psa-btn" onClick={()=>setActiveView("alerts")}>View all <ChevronRight size={12}/></button>} />
+          {alerts.filter(a=>a.status!=="RESOLVED").length===0 && <EmptyState text="No active alerts. All monitored zones are within safe parameters." />}
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {alerts.filter(a=>a.status!=="RESOLVED").slice(0,4).map(a=>(
+              <div key={a.id} className="psa-panel2" style={{padding:"9px 12px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div>
+                  <span className={"badge "+LEVEL_BADGE[a.level]}>{a.level}</span>
+                  <span style={{marginLeft:8,fontWeight:600}}>{HAZARD_LABEL[a.hazard]} · {a.location}</span>
+                  <div style={{fontSize:11,color:"var(--muted)",marginTop:2}}>{a.reason}</div>
+                </div>
+                <div className="mono" style={{fontSize:13,fontWeight:700,color:LEVEL_COLOR[a.level]}}>{a.riskScore}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="psa-panel" style={{padding:14}}>
+          <PanelHeader title="Fleet Risk Overview" />
+          <ResponsiveContainer width="100%" height={200}>
+            <BarChart data={nodes.map(n=>({name:n.id.replace("PS-NODE-",""),risk:n.riskScore, fill:LEVEL_COLOR[n.riskLevel]}))}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#1E2A38" />
+              <XAxis dataKey="name" stroke="#57667A" fontSize={10} />
+              <YAxis stroke="#57667A" fontSize={10} domain={[0,100]} />
+              <Tooltip contentStyle={{background:"#101720",border:"1px solid #1E2A38",fontSize:11}} />
+              <Bar dataKey="risk" radius={[4,4,0,0]}>
+                {nodes.map((n,i)=><Cell key={i} fill={LEVEL_COLOR[n.riskLevel]} />)}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function KpiCard({label,value,icon:Icon,color}){
+  return (
+    <div className="psa-panel" style={{padding:"12px 14px"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+        <div style={{fontSize:10.5,color:"var(--muted)",lineHeight:1.3}}>{label}</div>
+        <Icon size={14} color={color} />
+      </div>
+      <div className="mono" style={{fontSize:22,fontWeight:700,marginTop:6,color}}>{value}</div>
+    </div>
+  );
+}
+function PanelHeader({title,action}){
+  return <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+    <div style={{fontSize:12.5,fontWeight:700,color:"var(--text)"}}>{title}</div>{action}
+  </div>;
+}
+function EmptyState({text}){
+  return <div style={{padding:"18px 10px",textAlign:"center",color:"var(--muted2)",fontSize:12}}>{text}</div>;
+}
+
+/* ================= STYLIZED MAP ================= */
+function StylizedMap({nodes,onSelect,safeZones,height=420}){
+  return (
+    <svg viewBox="0 0 100 84" style={{width:"100%",height}} preserveAspectRatio="xMidYMid meet">
+      <rect x="0" y="0" width="100" height="84" fill="#0B121A" rx="3"/>
+      {[...Array(9)].map((_,i)=><line key={"v"+i} x1={i*12} y1="0" x2={i*12} y2="84" stroke="#161F2A" strokeWidth="0.3"/>)}
+      {[...Array(7)].map((_,i)=><line key={"h"+i} x1="0" y1={i*12} x2="100" y2={i*12} stroke="#161F2A" strokeWidth="0.3"/>)}
+      {["Zone A","Zone B","Zone C","Zone D","Zone E"].map((z,i)=>(
+        <text key={z} x={[20,60,72,42,80][i]} y={[20,14,42,58,20][i]} fill="#324459" fontSize="3.4" fontWeight="700">{z}</text>
+      ))}
+      {safeZones.map(z=>(
+        <g key={z.id}>
+          <rect x={z.x-2.2} y={z.y-2.2} width="4.4" height="4.4" fill="none" stroke="#33C97A" strokeWidth="0.5" transform={`rotate(45 ${z.x} ${z.y})`} />
+          <text x={z.x} y={z.y+5.5} fill="#5C7A6A" fontSize="2.6" textAnchor="middle">{z.name.split(" — ")[0]}</text>
+        </g>
+      ))}
+      {nodes.map(n=>{
+        const color = n.connectivity==="OFFLINE" ? "#4A5568" : LEVEL_COLOR[n.riskLevel];
+        const Icon = HAZARD_ICON[n.type];
+        return (
+          <g key={n.id} onClick={()=>onSelect(n.id)} style={{cursor:"pointer"}}>
+            {n.riskLevel==="CRITICAL" && <circle cx={n.x} cy={n.y} r="4.2" fill={color} opacity="0.25"><animate attributeName="r" values="3;6;3" dur="1.4s" repeatCount="indefinite"/></circle>}
+            <circle cx={n.x} cy={n.y} r="2.1" fill="#0B121A" stroke={color} strokeWidth="1.1" />
+            <circle cx={n.x} cy={n.y} r="0.9" fill={color} />
+            <text x={n.x} y={n.y-3} fill="#8FA3B8" fontSize="2.4" textAnchor="middle">{n.id.replace("PS-NODE-","N")}</text>
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+/* ================= MAP VIEW ================= */
+function MapView({nodes,mapFilter,setMapFilter,setSelectedNodeId,safeZones}){
+  const filters = ["ALL","FLOOD","FIRE","AIR","LANDSLIDE","CRITICAL"];
+  return (
+    <div style={{display:"grid",gridTemplateColumns:"1fr 280px",gap:14}}>
+      <div className="psa-panel" style={{padding:14}}>
+        <div style={{display:"flex",gap:6,marginBottom:10,flexWrap:"wrap"}}>
+          {filters.map(f=>(
+            <button key={f} className="psa-btn" style={{padding:"5px 10px",background:mapFilter===f?"#152230":undefined,borderColor:mapFilter===f?"var(--cyan)":undefined}}
+              onClick={()=>setMapFilter(f)}>{f}</button>
+          ))}
+        </div>
+        <StylizedMap nodes={nodes} onSelect={setSelectedNodeId} safeZones={safeZones} height={520}/>
+        <div style={{display:"flex",gap:14,marginTop:10,fontSize:11,color:"var(--muted)"}}>
+          <LegendDot color="var(--green)" label="Safe"/><LegendDot color="var(--cyan)" label="Watch"/>
+          <LegendDot color="var(--yellow)" label="Warning"/><LegendDot color="var(--orange)" label="High"/>
+          <LegendDot color="var(--red)" label="Critical"/><LegendDot color="#4A5568" label="Offline"/>
+        </div>
+      </div>
+      <div className="psa-panel" style={{padding:14}}>
+        <PanelHeader title="Safe Zones" />
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {safeZones.map(z=>(
+            <div key={z.id} className="psa-panel2" style={{padding:"8px 10px"}}>
+              <div style={{fontWeight:600,fontSize:12}}>{z.name}</div>
+              <div style={{fontSize:11,color:"var(--muted)",marginTop:3}}>Occupancy {z.occupancy}/{z.capacity}</div>
+              <span className={"badge "+(z.status==="AVAILABLE"?"b-safe":z.status==="NEAR CAPACITY"?"b-warning":"b-critical")} style={{marginTop:5}}>{z.status}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+function LegendDot({color,label}){ return <span style={{display:"flex",alignItems:"center",gap:5}}><span style={{width:8,height:8,borderRadius:99,background:color,display:"inline-block"}}/>{label}</span>; }
+
+/* ================= NODE DETAIL MODAL ================= */
+function NodeDetailModal({node,onClose,estimateTimeToCritical}){
+  const eta = node.type==="FLOOD"||node.type==="MULTI" ? estimateTimeToCritical(node) : null;
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(4,7,11,.65)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:60}} onClick={onClose}>
+      <div className="psa-panel" style={{width:560,maxHeight:"85vh",overflow:"auto",padding:20}} onClick={e=>e.stopPropagation()}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+          <div>
+            <div style={{fontSize:15,fontWeight:700}}>{node.id} · {node.name}</div>
+            <div style={{fontSize:11,color:"var(--muted)"}}>{node.zone} · {HAZARD_LABEL[node.type]} node · Firmware {node.firmware}</div>
+          </div>
+          <button className="psa-btn" onClick={onClose}>Close</button>
+        </div>
+        <div style={{display:"flex",gap:8,marginBottom:14}}>
+          <span className={"badge "+LEVEL_BADGE[node.riskLevel]}>{node.riskLevel}</span>
+          <span className="badge b-watch">Confidence {node.confidence}%</span>
+          <span className={"badge "+(node.fusionStatus==="ANOMALY_SUSPECTED"?"b-warning":"b-safe")}>{node.fusionStatus}</span>
+          <span className={"badge "+(node.connectivity==="ONLINE"?"b-safe":"b-critical")}>{node.connectivity}</span>
+        </div>
+        {eta && <div className="psa-panel2" style={{padding:"9px 12px",marginBottom:12,fontSize:12}}>
+          <b>Estimated Time to Critical Level:</b> {eta==="REACHED" ? "Critical level already reached." : eta} <span style={{color:"var(--muted2)"}}>(prototype linear projection — label as estimate)</span>
+        </div>}
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:14}}>
+          {Object.entries(node.telemetry).map(([k,v])=>(
+            <div key={k} className="psa-panel2" style={{padding:"7px 10px",display:"flex",justifyContent:"space-between"}}>
+              <span style={{color:"var(--muted)",fontSize:11,textTransform:"capitalize"}}>{k.replace(/([A-Z])/g," $1")}</span>
+              <span className="mono" style={{fontWeight:700,fontSize:12}}>{v.toFixed(1)}</span>
+            </div>
+          ))}
+        </div>
+        {node.factors?.length>0 && (
+          <div style={{marginBottom:10}}>
+            <div style={{fontSize:12,fontWeight:700,marginBottom:6}}>Why did AI give this score? ({node.riskScore}/100)</div>
+            {node.factors.map((f,i)=>(
+              <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:11.5,padding:"4px 0",borderBottom:"1px solid var(--line)"}}>
+                <span style={{color:"var(--muted)"}}>{f.label}</span><span className="mono">+{f.contribution}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        {node.history.length>2 && (
+          <ResponsiveContainer width="100%" height={140}>
+            <LineChart data={node.history}>
+              <XAxis dataKey="tick" stroke="#57667A" fontSize={9}/>
+              <YAxis stroke="#57667A" fontSize={9} domain={[0,100]}/>
+              <Tooltip contentStyle={{background:"#101720",border:"1px solid #1E2A38",fontSize:11}}/>
+              <Line type="monotone" dataKey="riskScore" stroke="#33C7E8" dot={false} strokeWidth={2}/>
+            </LineChart>
+          </ResponsiveContainer>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ================= NODES VIEW ================= */
+function NodesView({nodes,canEdit,disableNode,restartNode,sendTestData,deleteNode,newNodeForm,setNewNodeForm,addNode,
+  editingNodeId,setEditingNodeId,saveEditNode,historyNodeId,setHistoryNodeId,setSelectedNodeId}){
+  const [form,setForm] = useState({name:"",type:"FLOOD",zone:"Zone A",x:50,y:50});
+  return (
+    <div className="psa-panel" style={{padding:14}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+        <PanelHeader title={`Fleet (${nodes.length} nodes)`} />
+        <button className="psa-btn psa-btn-primary" disabled={!canEdit} onClick={()=>setNewNodeForm(f=>f?null:form)}><Plus size={13}/> Add Node</button>
+      </div>
+      {newNodeForm!==null && (
+        <div className="psa-panel2" style={{padding:12,marginBottom:12,display:"flex",gap:8,flexWrap:"wrap",alignItems:"center"}}>
+          <input className="psa-input" placeholder="Node name" value={form.name} onChange={e=>setForm({...form,name:e.target.value})}/>
+          <select className="psa-input" value={form.type} onChange={e=>setForm({...form,type:e.target.value})}>
+            {["FLOOD","FIRE","AIR","LANDSLIDE","MULTI"].map(t=><option key={t}>{t}</option>)}
+          </select>
+          <select className="psa-input" value={form.zone} onChange={e=>setForm({...form,zone:e.target.value})}>
+            {ZONES.map(z=><option key={z}>{z}</option>)}
+          </select>
+          <input className="psa-input" style={{width:60}} placeholder="x %" type="number" value={form.x} onChange={e=>setForm({...form,x:e.target.value})}/>
+          <input className="psa-input" style={{width:60}} placeholder="y %" type="number" value={form.y} onChange={e=>setForm({...form,y:e.target.value})}/>
+          <button className="psa-btn psa-btn-safe" onClick={()=>addNode(form)}>Create</button>
+          <button className="psa-btn" onClick={()=>setNewNodeForm(null)}>Cancel</button>
+        </div>
+      )}
+      <div style={{overflow:"auto"}}>
+        <table style={{width:"100%",borderCollapse:"collapse",fontSize:12}}>
+          <thead>
+            <tr style={{textAlign:"left",color:"var(--muted)",borderBottom:"1px solid var(--line)"}}>
+              {["Node","Type","Zone","Risk","Status","Battery","Connectivity","Actions"].map(h=><th key={h} style={{padding:"6px 8px",fontWeight:600}}>{h}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {nodes.map(n=>{
+              const Icon = HAZARD_ICON[n.type];
+              const editing = editingNodeId===n.id;
+              return (
+                <React.Fragment key={n.id}>
+                <tr style={{borderBottom:"1px solid var(--line)"}}>
+                  <td style={{padding:"7px 8px",cursor:"pointer"}} onClick={()=>setSelectedNodeId(n.id)}>
+                    <b>{n.id}</b><div style={{color:"var(--muted)",fontSize:11}}>{n.name}</div>
+                  </td>
+                  <td style={{padding:"7px 8px"}}><Icon size={13} style={{marginRight:4}}/>{n.type}</td>
+                  <td style={{padding:"7px 8px"}}>{n.zone}</td>
+                  <td style={{padding:"7px 8px"}} className="mono"><span style={{color:LEVEL_COLOR[n.riskLevel]}}>{n.riskScore}</span></td>
+                  <td style={{padding:"7px 8px"}}><span className={"badge "+LEVEL_BADGE[n.riskLevel]}>{n.riskLevel}</span></td>
+                  <td style={{padding:"7px 8px"}} className="mono">{n.telemetry.battery.toFixed(0)}%</td>
+                  <td style={{padding:"7px 8px"}}><span className={"badge "+(n.connectivity==="ONLINE"?"b-safe":"b-critical")}>{n.connectivity}</span></td>
+                  <td style={{padding:"7px 8px"}}>
+                    <div style={{display:"flex",gap:5}}>
+                      <IconBtn title="Edit" icon={Pencil} disabled={!canEdit} onClick={()=>setEditingNodeId(editing?null:n.id)}/>
+                      <IconBtn title="Disable/Enable" icon={Power} disabled={!canEdit} onClick={()=>disableNode(n.id)}/>
+                      <IconBtn title="Restart" icon={RotateCcw} disabled={!canEdit} onClick={()=>restartNode(n.id)}/>
+                      <IconBtn title="Send Test Data" icon={TestTube2} disabled={!canEdit} onClick={()=>sendTestData(n.id)}/>
+                      <IconBtn title="History" icon={History} onClick={()=>setHistoryNodeId(historyNodeId===n.id?null:n.id)}/>
+                      <IconBtn title="Delete" icon={Trash2} disabled={!canEdit} onClick={()=>deleteNode(n.id)}/>
+                    </div>
+                  </td>
+                </tr>
+                {editing && (
+                  <tr><td colSpan={8} style={{padding:"6px 8px",background:"#0D131B"}}>
+                    <EditNodeInline node={n} onSave={(f)=>saveEditNode(n.id,f)} onCancel={()=>setEditingNodeId(null)}/>
+                  </td></tr>
+                )}
+                {historyNodeId===n.id && n.history.length>1 && (
+                  <tr><td colSpan={8} style={{padding:"10px 8px",background:"#0D131B"}}>
+                    <ResponsiveContainer width="100%" height={120}>
+                      <LineChart data={n.history}>
+                        <XAxis dataKey="tick" stroke="#57667A" fontSize={9}/>
+                        <YAxis stroke="#57667A" fontSize={9}/>
+                        <Tooltip contentStyle={{background:"#101720",border:"1px solid #1E2A38",fontSize:11}}/>
+                        <Line type="monotone" dataKey="riskScore" stroke="#33C7E8" dot={false} strokeWidth={2}/>
+                      </LineChart>
+                    </ResponsiveContainer>
+                  </td></tr>
+                )}
+                </React.Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+function IconBtn({icon:Icon,onClick,title,disabled}){
+  return <button className="psa-btn" title={title} disabled={disabled} style={{padding:"5px 7px"}} onClick={onClick}><Icon size={12}/></button>;
+}
+function EditNodeInline({node,onSave,onCancel}){
+  const [f,setF] = useState({name:node.name,type:node.type,zone:node.zone});
+  return (
+    <div style={{display:"flex",gap:8,alignItems:"center"}}>
+      <input className="psa-input" value={f.name} onChange={e=>setF({...f,name:e.target.value})}/>
+      <select className="psa-input" value={f.type} onChange={e=>setF({...f,type:e.target.value})}>
+        {["FLOOD","FIRE","AIR","LANDSLIDE","MULTI"].map(t=><option key={t}>{t}</option>)}
+      </select>
+      <select className="psa-input" value={f.zone} onChange={e=>setF({...f,zone:e.target.value})}>
+        {ZONES.map(z=><option key={z}>{z}</option>)}
+      </select>
+      <button className="psa-btn psa-btn-safe" onClick={()=>onSave(f)}>Save</button>
+      <button className="psa-btn" onClick={onCancel}>Cancel</button>
+    </div>
+  );
+}
+
+/* ================= HAZARD INTELLIGENCE ================= */
+function IntelView({nodes}){
+  const hazards = ["FLOOD","FIRE","AIR","LANDSLIDE"];
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:14}}>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12}}>
+        {hazards.map(h=>{
+          const relevant = nodes.filter(n=>n.hazardScores && n.hazardScores[h]);
+          const top = relevant.sort((a,b)=>(b.hazardScores[h]?.score||0)-(a.hazardScores[h]?.score||0))[0];
+          const score = top ? top.hazardScores[h].score : 0;
+          const level = levelFromScore(score);
+          const Icon = HAZARD_ICON[h];
+          return (
+            <div key={h} className="psa-panel" style={{padding:14}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+                <div style={{display:"flex",gap:7,alignItems:"center"}}><Icon size={16} color={LEVEL_COLOR[level]}/><b style={{fontSize:12.5}}>{HAZARD_LABEL[h]}</b></div>
+                <span className={"badge "+LEVEL_BADGE[level]}>{level}</span>
+              </div>
+              <div className="mono" style={{fontSize:26,fontWeight:700,marginTop:8,color:LEVEL_COLOR[level]}}>{score}</div>
+              <div style={{fontSize:11,color:"var(--muted)",marginTop:4}}>Peak node: {top?top.id:"—"}</div>
+              {top && (
+                <div style={{marginTop:8,display:"flex",flexDirection:"column",gap:3}}>
+                  {top.hazardScores[h].factors.slice(0,3).map((f,i)=>(
+                    <div key={i} style={{display:"flex",justifyContent:"space-between",fontSize:10.5,color:"var(--muted)"}}>
+                      <span>{f.label}</span><span className="mono">+{f.contribution}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="psa-panel" style={{padding:16}}>
+        <PanelHeader title="Traditional IoT vs. Prakriti Sentinel AI Pipeline" />
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:16}}>
+          <div className="psa-panel2" style={{padding:14}}>
+            <div style={{fontSize:11.5,color:"var(--muted)",marginBottom:8,fontWeight:700}}>TRADITIONAL IoT</div>
+            <PipelineRow steps={["Sense","Send","Display"]} color="var(--muted)"/>
+            <p style={{fontSize:11.5,color:"var(--muted)",marginTop:10,lineHeight:1.6}}>
+              A single sensor crossing a fixed threshold triggers an alert directly, with no cross-checking —
+              prone to false alarms from a single faulty reading.
+            </p>
+          </div>
+          <div className="psa-panel2" style={{padding:14}}>
+            <div style={{fontSize:11.5,color:"var(--cyan)",marginBottom:8,fontWeight:700}}>PRAKRITI SENTINEL AI</div>
+            <PipelineRow steps={["Sense","Validate","Understand","Predict","Localize","Alert","Act"]} color="var(--cyan)"/>
+            <p style={{fontSize:11.5,color:"var(--muted)",marginTop:10,lineHeight:1.6}}>
+              Readings pass through multi-node sensor fusion before AI risk scoring, giving explainable,
+              confidence-rated alerts and a concrete response workflow.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+function PipelineRow({steps,color}){
+  return <div style={{display:"flex",flexWrap:"wrap",gap:6,alignItems:"center"}}>
+    {steps.map((s,i)=>(
+      <React.Fragment key={s}>
+        <span className="psa-panel2" style={{padding:"5px 10px",fontSize:11.5,fontWeight:600,color}}>{s}</span>
+        {i<steps.length-1 && <ChevronRight size={13} color="var(--muted2)"/>}
+      </React.Fragment>
+    ))}
+  </div>;
+}
+
+/* ================= ALERTS ================= */
+function AlertsView({alerts,canRespond,acknowledgeAlert,escalateAlert,resolveAlert}){
+  if(!alerts.length) return <div className="psa-panel" style={{padding:14}}><EmptyState text="No alerts have been generated yet. Start a scenario in the Simulation Center."/></div>;
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:10}}>
+      {alerts.map(a=>(
+        <div key={a.id} className="psa-panel" style={{padding:16}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+            <div>
+              <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:6}}>
+                <span className={"badge "+LEVEL_BADGE[a.level]}>{a.level} {HAZARD_LABEL[a.hazard]} ALERT</span>
+                <span style={{fontSize:11,color:"var(--muted2)"}}>{a.id} · {a.timestamp}</span>
+                <span className={"badge "+(a.status==="ACTIVE"?"b-warning":a.status==="ACKNOWLEDGED"?"b-watch":"b-safe")}>{a.status}</span>
+              </div>
+              <div style={{fontSize:13,fontWeight:600}}>Location: {a.location} · Node {a.nodeId}</div>
+              <div style={{fontSize:12,marginTop:2}}>Risk: <span className="mono" style={{color:LEVEL_COLOR[a.level]}}>{a.riskScore}/100</span> · Confidence: <span className="mono">{a.confidence}%</span></div>
+              <div style={{fontSize:12,color:"var(--muted)",marginTop:4}}>Reason: {a.reason}</div>
+              <div style={{marginTop:8}}>
+                <div style={{fontSize:11.5,fontWeight:700,marginBottom:4}}>Recommended Action</div>
+                <ol style={{margin:0,paddingLeft:18,fontSize:11.5,color:"var(--muted)",lineHeight:1.7}}>
+                  {a.recommendedActions.map((r,i)=><li key={i}>{r}</li>)}
+                </ol>
+              </div>
+            </div>
+            <div style={{display:"flex",flexDirection:"column",gap:6,minWidth:130}}>
+              <button className="psa-btn" disabled={!canRespond||a.status!=="ACTIVE"} onClick={()=>acknowledgeAlert(a.id)}>Acknowledge</button>
+              <button className="psa-btn psa-btn-danger" disabled={!canRespond||a.level==="CRITICAL"||a.status==="RESOLVED"} onClick={()=>escalateAlert(a.id)}>Escalate</button>
+              <button className="psa-btn psa-btn-safe" disabled={!canRespond||a.status==="RESOLVED"} onClick={()=>resolveAlert(a.id)}>Resolve</button>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+/* ================= RESCUE / RESPONSE ================= */
+function RescueView({incidents,nodes,safeZones,canRespond,startResponse,advanceWorkflow,responseWorkflows,nearestSafeZone,WORKFLOW_STEPS}){
+  if(!incidents.length) return <div className="psa-panel" style={{padding:14}}><EmptyState text="No incidents recorded. A CRITICAL alert automatically opens an incident here."/></div>;
+  const stepLabels = {STARTED:"START RESPONSE",TEAM_DISPATCHED:"DISPATCH TEAM",EVACUATION_MARKED:"MARK EVACUATION",SAFE_ZONE_OPENED:"OPEN SAFE ZONE",RESOLVED:"MARK RESOLVED"};
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:12}}>
+      {incidents.map(inc=>{
+        const node = nodes.find(n=>n.id===inc.nodeId);
+        const nearest = nearestSafeZone(inc.nodeId);
+        const wf = responseWorkflows[inc.id];
+        const stepIndex = wf ? wf.stepIndex : -1;
+        return (
+          <div key={inc.id} className="psa-panel" style={{padding:16}}>
+            <div style={{display:"flex",justifyContent:"space-between"}}>
+              <div>
+                <div style={{display:"flex",gap:8,alignItems:"center"}}>
+                  <b>{inc.id}</b><span className={"badge "+(inc.status==="RESOLVED"?"b-safe":"b-critical")}>{inc.status}</span>
+                  <span style={{fontSize:11,color:"var(--muted2)"}}>{inc.startTime}</span>
+                </div>
+                <div style={{fontSize:13,marginTop:4}}>{HAZARD_LABEL[inc.hazard]} · {inc.location} · Node {inc.nodeId}</div>
+                <div style={{fontSize:11.5,color:"var(--muted)",marginTop:2}}>Peak risk {inc.peakRisk}/100 · Peak confidence {inc.peakConfidence}%</div>
+              </div>
+              {nearest && (
+                <div className="psa-panel2" style={{padding:"8px 12px",fontSize:11.5,minWidth:190}}>
+                  <div style={{color:"var(--muted)"}}>Recommended Safe Zone</div>
+                  <b>{nearest.name}</b>
+                  <div style={{color:"var(--muted2)"}}>Capacity {nearest.occupancy}/{nearest.capacity}</div>
+                </div>
+              )}
+            </div>
+
+            <div style={{display:"flex",gap:8,marginTop:12,flexWrap:"wrap"}}>
+              {stepIndex<0 ? (
+                <button className="psa-btn psa-btn-primary" disabled={!canRespond} onClick={()=>startResponse(inc.id)}>START RESPONSE</button>
+              ) : WORKFLOW_STEPS.map((s,i)=>(
+                <button key={s} className={"psa-btn "+(s==="RESOLVED"?"psa-btn-safe":"")}
+                  disabled={!canRespond || i <= stepIndex || i !== stepIndex+1}
+                  style={{opacity: i<=stepIndex?0.4:1}}
+                  onClick={()=>advanceWorkflow(inc.id, s)}>
+                  {i<=stepIndex ? <CheckCircle2 size={12}/> : null} {stepLabels[s]}
+                </button>
+              ))}
+            </div>
+
+            {inc.actionsTaken.length>0 && (
+              <div style={{marginTop:10,fontSize:11,color:"var(--muted)"}}>
+                Timeline: {inc.actionsTaken.join(" → ")}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/* ================= ANALYTICS ================= */
+function AnalyticsView({nodes,incidents,alerts,analyticsRange,setAnalyticsRange,exportIncidentsCSV}){
+  const rangeLimit = {"1H":15,"6H":40,"24H":60,"7D":60,"CUSTOM":60}[analyticsRange];
+  const combined = useMemo(()=>{
+    const map = {};
+    nodes.forEach(n=>n.history.slice(-rangeLimit).forEach(h=>{
+      if(!map[h.tick]) map[h.tick] = {tick:h.tick};
+      map[h.tick]["risk_"+n.id.replace("PS-NODE-","N")] = h.riskScore;
+    }));
+    return Object.values(map).sort((a,b)=>a.tick-b.tick);
+  },[nodes,rangeLimit]);
+
+  const alertsByHazard = ["FLOOD","FIRE","AIR","LANDSLIDE"].map(h=>({name:HAZARD_LABEL[h],value:alerts.filter(a=>a.hazard===h).length}));
+  const alertsBySeverity = ["WATCH","WARNING","HIGH","CRITICAL"].map(l=>({name:l,value:alerts.filter(a=>a.level===l).length}));
+  const PIE_COLORS = ["#33C7E8","#E8B93B","#F0863F","#E9455A"];
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:14}}>
+      <div className="psa-panel" style={{padding:14}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <PanelHeader title="Risk Score vs Time (all nodes)" />
+          <div style={{display:"flex",gap:6}}>
+            {["1H","6H","24H","7D","CUSTOM"].map(r=>(
+              <button key={r} className="psa-btn" style={{padding:"4px 9px",background:analyticsRange===r?"#152230":undefined}} onClick={()=>setAnalyticsRange(r)}>{r}</button>
+            ))}
+          </div>
+        </div>
+        <ResponsiveContainer width="100%" height={240}>
+          <LineChart data={combined}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#1E2A38"/>
+            <XAxis dataKey="tick" stroke="#57667A" fontSize={10}/>
+            <YAxis stroke="#57667A" fontSize={10} domain={[0,100]}/>
+            <Tooltip contentStyle={{background:"#101720",border:"1px solid #1E2A38",fontSize:11}}/>
+            <Legend wrapperStyle={{fontSize:10}}/>
+            {nodes.slice(0,6).map((n,i)=>(
+              <Line key={n.id} type="monotone" dataKey={"risk_"+n.id.replace("PS-NODE-","N")} stroke={["#33C7E8","#33C97A","#E8B93B","#F0863F","#E9455A","#8b5cf6"][i%6]} dot={false} strokeWidth={1.6}/>
+            ))}
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14}}>
+        <div className="psa-panel" style={{padding:14}}>
+          <PanelHeader title="Alerts by Hazard"/>
+          <ResponsiveContainer width="100%" height={200}>
+            <BarChart data={alertsByHazard}>
+              <XAxis dataKey="name" stroke="#57667A" fontSize={10}/>
+              <YAxis stroke="#57667A" fontSize={10} allowDecimals={false}/>
+              <Tooltip contentStyle={{background:"#101720",border:"1px solid #1E2A38",fontSize:11}}/>
+              <Bar dataKey="value" fill="#33C7E8" radius={[4,4,0,0]}/>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+        <div className="psa-panel" style={{padding:14}}>
+          <PanelHeader title="Alerts by Severity"/>
+          <ResponsiveContainer width="100%" height={200}>
+            <PieChart>
+              <Pie data={alertsBySeverity} dataKey="value" nameKey="name" outerRadius={75}>
+                {alertsBySeverity.map((e,i)=><Cell key={i} fill={PIE_COLORS[i]}/>)}
+              </Pie>
+              <Tooltip contentStyle={{background:"#101720",border:"1px solid #1E2A38",fontSize:11}}/>
+              <Legend wrapperStyle={{fontSize:10}}/>
+            </PieChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+
+      <div className="psa-panel" style={{padding:14}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <PanelHeader title={`Incident History (${incidents.length})`}/>
+          <button className="psa-btn" onClick={exportIncidentsCSV}><Download size={13}/> Export CSV</button>
+        </div>
+        {!incidents.length ? <EmptyState text="No incidents recorded yet."/> : (
+          <table style={{width:"100%",fontSize:11.5,borderCollapse:"collapse"}}>
+            <thead><tr style={{color:"var(--muted)",borderBottom:"1px solid var(--line)",textAlign:"left"}}>
+              {["ID","Hazard","Location","Peak Risk","Status","Resolution"].map(h=><th key={h} style={{padding:"6px 8px"}}>{h}</th>)}
+            </tr></thead>
+            <tbody>{incidents.map(i=>(
+              <tr key={i.id} style={{borderBottom:"1px solid var(--line)"}}>
+                <td style={{padding:"6px 8px"}}>{i.id}</td><td style={{padding:"6px 8px"}}>{HAZARD_LABEL[i.hazard]}</td>
+                <td style={{padding:"6px 8px"}}>{i.location}</td><td style={{padding:"6px 8px"}} className="mono">{i.peakRisk}</td>
+                <td style={{padding:"6px 8px"}}><span className={"badge "+(i.status==="RESOLVED"?"b-safe":"b-critical")}>{i.status}</span></td>
+                <td style={{padding:"6px 8px"}}>{i.resolutionTime||"—"}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ================= SIMULATION CENTER ================= */
+function SimulationView({scenario,setScenario,simRunning,setSimRunning,simSpeed,setSimSpeed,tick,nodes,estimateTimeToCritical,runSensorAnomalyDemo}){
+  const scenarios = [
+    {id:"NORMAL",label:"Normal Conditions",icon:CheckCircle2},
+    {id:"FLOOD",label:"Flood Scenario",icon:Droplets},
+    {id:"FIRE",label:"Forest Fire Scenario",icon:Flame},
+    {id:"POLLUTION",label:"Pollution Scenario",icon:Wind},
+    {id:"HEAT",label:"Heat Wave Scenario",icon:ThermometerSun},
+    {id:"LANDSLIDE",label:"Landslide Scenario",icon:Mountain},
+    {id:"INDUSTRIAL",label:"Industrial Leak Scenario",icon:CircleAlert},
+  ];
+  const activeNodes = nodes.filter(n=>n.zone===SCENARIO_ZONE[scenario]);
+  const floodNode = nodes.find(n=>(n.type==="FLOOD") && n.zone===SCENARIO_ZONE.FLOOD);
+
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:14}}>
+      <div className="psa-panel" style={{padding:16}}>
+        <PanelHeader title="Select Scenario"/>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10}}>
+          {scenarios.map(s=>{
+            const Icon=s.icon;
+            return (
+              <button key={s.id} onClick={()=>setScenario(s.id)}
+                className="psa-panel2" style={{padding:"12px",textAlign:"left",border: scenario===s.id?"1px solid var(--cyan)":"1px solid var(--line)",cursor:"pointer"}}>
+                <Icon size={16} color={scenario===s.id?"var(--cyan)":"var(--muted)"}/>
+                <div style={{marginTop:6,fontSize:12,fontWeight:600}}>{s.label}</div>
+              </button>
+            );
+          })}
+        </div>
+
+        <div style={{display:"flex",gap:10,alignItems:"center",marginTop:16}}>
+          {!simRunning ? (
+            <button className="psa-btn psa-btn-primary" onClick={()=>setSimRunning(true)}><Play size={13}/> Start Simulation</button>
+          ) : (
+            <button className="psa-btn" onClick={()=>setSimRunning(false)}><Pause size={13}/> Pause</button>
+          )}
+          <button className="psa-btn" onClick={()=>setSimRunning(true)}>Resume</button>
+          <button className="psa-btn psa-btn-danger" onClick={()=>{setSimRunning(false); setScenario("NORMAL");}}><RotateCcw size={13}/> Reset</button>
+          <div style={{marginLeft:"auto",display:"flex",gap:6,alignItems:"center"}}>
+            <span style={{fontSize:11,color:"var(--muted)"}}>Speed</span>
+            {[1,2,5,10].map(s=>(
+              <button key={s} className="psa-btn" style={{padding:"4px 9px",background:simSpeed===s?"#152230":undefined}} onClick={()=>setSimSpeed(s)}>{s}x</button>
+            ))}
+          </div>
+        </div>
+        <div style={{marginTop:10,fontSize:11.5,color:"var(--muted)"}}>Tick: <span className="mono">{tick}</span> · Affected zone: <b>{SCENARIO_ZONE[scenario]||"—"}</b></div>
+      </div>
+
+      {scenario==="FLOOD" && floodNode && (
+        <div className="psa-panel" style={{padding:16}}>
+          <PanelHeader title="Predictive Flood System"/>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10}}>
+            <StatBox label="Current Water Level" value={floodNode.telemetry.waterLevel.toFixed(1)+" cm"} />
+            <StatBox label="Rainfall" value={floodNode.telemetry.rainfall.toFixed(1)+" mm/hr"} />
+            <StatBox label="Flood Risk" value={floodNode.riskScore+"/100"} color={LEVEL_COLOR[floodNode.riskLevel]} />
+            <StatBox label="Est. Time to Critical" value={estimateTimeToCritical(floodNode)||"—"} />
+          </div>
+        </div>
+      )}
+
+      <div className="psa-panel" style={{padding:16}}>
+        <PanelHeader title={`Live Telemetry — ${SCENARIO_ZONE[scenario]||"All zones stable"}`}/>
+        {!activeNodes.length ? <EmptyState text="Select a scenario to see affected sensor nodes here."/> : (
+          <ResponsiveContainer width="100%" height={220}>
+            <LineChart data={activeNodes[0]?.history || []}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#1E2A38"/>
+              <XAxis dataKey="tick" stroke="#57667A" fontSize={10}/>
+              <YAxis stroke="#57667A" fontSize={10}/>
+              <Tooltip contentStyle={{background:"#101720",border:"1px solid #1E2A38",fontSize:11}}/>
+              <Legend wrapperStyle={{fontSize:10}}/>
+              <Line type="monotone" dataKey="riskScore" name="Risk" stroke="#E9455A" dot={false} strokeWidth={2}/>
+              <Line type="monotone" dataKey="waterLevel" name="Water Level" stroke="#33C7E8" dot={false} strokeWidth={1.5}/>
+              <Line type="monotone" dataKey="temperature" name="Temp" stroke="#F0863F" dot={false} strokeWidth={1.5}/>
+              <Line type="monotone" dataKey="pm25" name="PM2.5" stroke="#E8B93B" dot={false} strokeWidth={1.5}/>
+              <Line type="monotone" dataKey="soilMoisture" name="Soil Moisture" stroke="#33C97A" dot={false} strokeWidth={1.5}/>
+            </LineChart>
+          </ResponsiveContainer>
+        )}
+      </div>
+    </div>
+  );
+}
+function StatBox({label,value,color}){
+  return <div className="psa-panel2" style={{padding:"10px 12px"}}>
+    <div style={{fontSize:10.5,color:"var(--muted)"}}>{label}</div>
+    <div className="mono" style={{fontSize:16,fontWeight:700,marginTop:4,color:color||"var(--text)"}}>{value}</div>
+  </div>;
+}
+
+/* ================= DEVICES ================= */
+function DevicesView({nodes}){
+  const [attempts,setAttempts] = useState([]);
+  function simulateUnauthorized(){
+    setAttempts(prev=>[{id:"ATT-"+Math.random().toString(36).slice(2,7),time:new Date().toLocaleTimeString(),
+      nodeId:"UNKNOWN-"+Math.floor(Math.random()*999),reason:"Invalid device token"},...prev].slice(0,20));
+  }
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:14}}>
+      <div className="psa-panel" style={{padding:14}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <PanelHeader title="Device Authentication"/>
+          <button className="psa-btn" onClick={simulateUnauthorized}>Simulate Unauthorized Attempt</button>
+        </div>
+        <table style={{width:"100%",fontSize:11.5,borderCollapse:"collapse"}}>
+          <thead><tr style={{color:"var(--muted)",borderBottom:"1px solid var(--line)",textAlign:"left"}}>
+            <th style={{padding:"6px 8px"}}>Node ID</th><th style={{padding:"6px 8px"}}>Device Key</th><th style={{padding:"6px 8px"}}>Firmware</th><th style={{padding:"6px 8px"}}>Status</th>
+          </tr></thead>
+          <tbody>{nodes.map(n=>(
+            <tr key={n.id} style={{borderBottom:"1px solid var(--line)"}}>
+              <td style={{padding:"6px 8px"}}>{n.id}</td>
+              <td style={{padding:"6px 8px"}} className="mono">tok_{n.id.toLowerCase().replace(/-/g,"")}••••</td>
+              <td style={{padding:"6px 8px"}}>{n.firmware}</td>
+              <td style={{padding:"6px 8px"}}><span className={"badge "+(n.connectivity==="ONLINE"?"b-safe":"b-critical")}>{n.connectivity==="ONLINE"?"AUTHORIZED":"OFFLINE"}</span></td>
+            </tr>
+          ))}</tbody>
+        </table>
+      </div>
+      <div className="psa-panel" style={{padding:14}}>
+        <PanelHeader title="Rejected / Unauthorized Telemetry Attempts"/>
+        {!attempts.length ? <EmptyState text="No unauthorized access attempts logged."/> : (
+          <div style={{display:"flex",flexDirection:"column",gap:6}}>
+            {attempts.map(a=>(
+              <div key={a.id} className="psa-panel2" style={{padding:"7px 10px",fontSize:11.5,display:"flex",justifyContent:"space-between"}}>
+                <span><span className="mono" style={{color:"var(--muted2)"}}>{a.time}</span> — {a.nodeId} rejected</span>
+                <span style={{color:"var(--red)"}}>{a.reason}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ================= SYSTEM HEALTH ================= */
+function HealthView({systemStatus,simulateConnectivityLoss,restoreConnectivity,kpi,nodes,queuedEvents}){
+  const services = [
+    {name:"REST API",status:systemStatus==="OFFLINE"?"OFFLINE":"HEALTHY",latency:12+Math.round(Math.random()*8)},
+    {name:"Database",status:systemStatus==="OFFLINE"?"OFFLINE":"HEALTHY",latency:4+Math.round(Math.random()*4)},
+    {name:"MQTT Broker",status:systemStatus==="OFFLINE"?"OFFLINE":systemStatus==="SYNCING"?"WARNING":"HEALTHY",latency:8+Math.round(Math.random()*6)},
+    {name:"WebSocket Stream",status:systemStatus==="ONLINE"?"HEALTHY":systemStatus==="SYNCING"?"WARNING":"OFFLINE",latency:6+Math.round(Math.random()*4)},
+    {name:"AI Risk Engine",status:"HEALTHY",latency:2+Math.round(Math.random()*3)},
+    {name:"Map Service",status:"HEALTHY",latency:15+Math.round(Math.random()*10)},
+    {name:"Notification Service",status:"HEALTHY (local)",latency:3+Math.round(Math.random()*3)},
+  ];
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:14}}>
+      <div className="psa-panel" style={{padding:16,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <div>
+          <div style={{fontSize:13,fontWeight:700}}>System Status: <span style={{color: systemStatus==="ONLINE"?"var(--green)":systemStatus==="SYNCING"?"var(--yellow)":"var(--red)"}}>{systemStatus}</span></div>
+          <div style={{fontSize:11,color:"var(--muted)",marginTop:2}}>Edge Mode demo: simulate a connectivity loss to see local processing & queued sync take over.</div>
+        </div>
+        {systemStatus==="ONLINE" ? (
+          <button className="psa-btn psa-btn-danger" onClick={simulateConnectivityLoss}>Simulate Connectivity Loss</button>
+        ) : systemStatus==="OFFLINE" ? (
+          <button className="psa-btn psa-btn-safe" onClick={restoreConnectivity}>Restore Connection</button>
+        ) : <span className="badge b-warning">SYNCING…</span>}
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10}}>
+        <StatBox label="Connected Nodes" value={`${kpi.online}/${kpi.total}`}/>
+        <StatBox label="Messages / sec" value={(kpi.online*0.7).toFixed(1)}/>
+        <StatBox label="Queued Events" value={queuedEvents}/>
+        <StatBox label="Last Heartbeat" value={systemStatus!=="OFFLINE"?new Date().toLocaleTimeString():"—"}/>
+      </div>
+
+      <div className="psa-panel" style={{padding:14}}>
+        <PanelHeader title="Service Health"/>
+        <table style={{width:"100%",fontSize:12,borderCollapse:"collapse"}}>
+          <thead><tr style={{color:"var(--muted)",borderBottom:"1px solid var(--line)",textAlign:"left"}}>
+            <th style={{padding:"6px 8px"}}>Service</th><th style={{padding:"6px 8px"}}>Status</th><th style={{padding:"6px 8px"}}>Latency</th>
+          </tr></thead>
+          <tbody>{services.map(s=>(
+            <tr key={s.name} style={{borderBottom:"1px solid var(--line)"}}>
+              <td style={{padding:"6px 8px"}}>{s.name}</td>
+              <td style={{padding:"6px 8px"}}><span className={"badge "+(s.status.includes("HEALTHY")?"b-safe":s.status==="WARNING"?"b-warning":"b-critical")}>{s.status}</span></td>
+              <td style={{padding:"6px 8px"}} className="mono">{s.status==="OFFLINE"?"—":s.latency+" ms"}</td>
+            </tr>
+          ))}</tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+/* ================= SETTINGS ================= */
+function SettingsView({role,setRole,notifications}){
+  return (
+    <div style={{display:"flex",flexDirection:"column",gap:14}}>
+      <div className="psa-panel" style={{padding:16}}>
+        <PanelHeader title="User Role (route protection demo)"/>
+        <div style={{display:"flex",gap:8}}>
+          {["ADMIN","AUTHORITY","OPERATOR","VIEWER"].map(r=>(
+            <button key={r} className="psa-btn" style={{background:role===r?"#152230":undefined,borderColor:role===r?"var(--cyan)":undefined}} onClick={()=>setRole(r)}>{r}</button>
+          ))}
+        </div>
+        <div style={{fontSize:11.5,color:"var(--muted)",marginTop:10,lineHeight:1.6}}>
+          ADMIN: full access. AUTHORITY: alerts, incidents, response, maps. OPERATOR: sensors, simulation, monitoring.
+          VIEWER: read-only dashboard. Switching roles above actually disables the corresponding action buttons across the app.
+        </div>
+      </div>
+      <div className="psa-panel" style={{padding:14}}>
+        <PanelHeader title="Notification Log"/>
+        {!notifications.length ? <EmptyState text="No notifications sent yet."/> : (
+          <div style={{display:"flex",flexDirection:"column",gap:6,maxHeight:320,overflow:"auto"}}>
+            {notifications.map(n=>(
+              <div key={n.id} className="psa-panel2" style={{padding:"7px 10px",fontSize:11.5,display:"flex",justifyContent:"space-between"}}>
+                <span><span className="mono" style={{color:"var(--muted2)"}}>{n.time}</span> [{n.channel}] {n.recipient}: {n.message}</span>
+                <span className={"badge "+(n.status==="DELIVERED"?"b-safe":"b-warning")}>{n.status.replace(/_/g," ")}</span>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
